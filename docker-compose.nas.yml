@@ -9,6 +9,8 @@
 services:
   postgres:
     image: postgres:16-alpine
+    # 固定容器名,否则 compose 会按 <项目名>-<服务名>-<序号> 生成 artex-postgres-1
+    container_name: artex-db
     environment:
       POSTGRES_USER: artex
       POSTGRES_PASSWORD: artex_db_pw_CHANGE_ME   # ← 改这里
@@ -31,6 +33,7 @@ services:
       # args:
       #   NODE_MAX_OLD_SPACE: "2048"
     image: artex:local
+    container_name: artex
     depends_on:
       postgres:
         condition: service_healthy
