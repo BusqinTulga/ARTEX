@@ -58,8 +58,16 @@ services:
       # 放到局域网上等于开放中继。确实要从 Mac 挂这个代理时,改成 "8788:8788"。
       - "127.0.0.1:8788:8788"
     volumes:
-      # data/ 含 jwt.key、会话记录等,绑定到项目目录方便备份,容器重建不丢
+      # 会话、任务、流量记录等,绑定到项目目录方便备份,容器重建不丢
       - ./data:/app/data
+      # JWT 签名密钥。它不在 data/ 里 —— server/auth.go 的 loadOrCreateJWTKey 刻意
+      # 把它放在可执行文件同级目录(容器内 /app),因为 data/ 是 Web UI 文件管理器
+      # 可浏览、可下载的工作区,签名密钥不能躺在那儿。
+      # 但 /app 在镜像层里,不单独挂出来的话每次重建容器都会重新生成密钥,
+      # 所有已登录会话当场失效。
+      # 前置条件:宿主机上这个文件必须已存在(先 touch jwt.key),
+      # 否则 Docker 会在该路径建一个目录,artex 启动时会直接报错退出。
+      - ./jwt.key:/app/jwt.key
       # skills/ 挂进去覆盖镜像内置版本,改 skill 不用重建镜像
       - ./skills:/app/skills
     restart: unless-stopped
