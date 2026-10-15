@@ -1,0 +1,60 @@
+# 群晖 Container Manager 用的 compose。
+# 与上游 docker-compose.yml 的区别:
+#   1. artex 不再拉 Docker Hub 镜像(autumn27/artex 已下架),改为本地 build。
+#   2. 不用 ${VAR} / .env —— Container Manager 的项目界面对 .env 支持不稳定,
+#      这里全部写死,改密码直接改本文件。
+#
+# 用前必做:把下面两处 artex_db_pw_CHANGE_ME 改成同一个你自己的密码。
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: artex
+      POSTGRES_PASSWORD: artex_db_pw_CHANGE_ME   # ← 改这里
+      POSTGRES_DB: artex
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # 不 publish 端口:只给同网络的 artex 用,不暴露到 NAS 局域网
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artex -d artex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  artex:
+    build:
+      context: .
+      dockerfile: Dockerfile.nas
+      # NAS 内存 ≤4GB 时取消下面两行注释,把 Next 构建的堆上限压到 2GB
+      # args:
+      #   NODE_MAX_OLD_SPACE: "2048"
+    image: artex:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ARTEX_PG_DSN: postgres://artex:artex_db_pw_CHANGE_ME@postgres:5432/artex?sslmode=disable   # ← 和上面同一个密码
+      # LLM 可以留空,首次进 Web UI 后在设置里配;也可以在这里直接填:
+      # ANTHROPIC_API_KEY: sk-ant-...
+      # OPENAI_API_KEY: sk-...
+      # ARTEX_LLM_PROVIDER: anthropic
+      # ARTEX_LLM_MODEL: claude-opus-5
+      # ARTEX_LLM_BASE_URL: ""
+      # ARTEX_LLM_PROXY: ""
+    ports:
+      # Web UI + API
+      - "8787:8787"
+      # 流量录制/拦截代理。默认只绑 NAS 本机 —— 这是个 MITM 代理,
+      # 放到局域网上等于开放中继。确实要从 Mac 挂这个代理时,改成 "8788:8788"。
+      - "127.0.0.1:8788:8788"
+    volumes:
+      # data/ 含 jwt.key、会话记录等,绑定到项目目录方便备份,容器重建不丢
+      - ./data:/app/data
+      # skills/ 挂进去覆盖镜像内置版本,改 skill 不用重建镜像
+      - ./skills:/app/skills
+    restart: unless-stopped
+
+volumes:
+  pgdata:
