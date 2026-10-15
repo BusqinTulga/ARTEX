@@ -1,41 +1,66 @@
+# 群晖 Container Manager 用的 compose（本仓库的默认 compose）。
+# 上游原版保留在 docker-compose.upstream.yml，仅供参考——它拉的
+# autumn27/artex 镜像已从 Docker Hub 下架，开箱即用不了。
+#
+# 与上游原版的区别:
+#   1. artex 不再拉 Docker Hub 镜像,改为用 Dockerfile.nas 本地 build。
+#   2. 不用 ${VAR} / .env —— Container Manager 的项目界面对 .env 支持不稳定,
+#      这里全部写死,改密码直接改本文件。
+#
+# 用前必做:把下面两处 artex_db_pw_CHANGE_ME 改成同一个你自己的密码。
+# 注意:本文件是跟踪文件,你填的密码属于本地改动,后续 git pull 若恰好也动到
+# 这两行会提示冲突,届时保留你自己的密码即可。
+
 services:
   postgres:
     image: postgres:16-alpine
+    # 固定容器名,否则 compose 会按 <项目名>-<服务名>-<序号> 生成 artex-postgres-1
+    container_name: artex-db
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-artex}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置 POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-artex}
+      POSTGRES_USER: artex
+      POSTGRES_PASSWORD: artex_db_pw_CHANGE_ME   # ← 改这里
+      POSTGRES_DB: artex
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # 不 publish 端口:只给同网络的 artex 用,不暴露到 NAS 局域网
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-artex} -d ${POSTGRES_DB:-artex}"]
+      test: ["CMD-SHELL", "pg_isready -U artex -d artex"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
 
   artex:
-    image: autumn27/artex:${ARTEX_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.nas
+      # NAS 内存 ≤4GB 时取消下面两行注释,把 Next 构建的堆上限压到 2GB
+      # args:
+      #   NODE_MAX_OLD_SPACE: "2048"
+    image: artex:local
+    container_name: artex
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      ARTEX_PG_DSN: postgres://${POSTGRES_USER:-artex}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-artex}?sslmode=disable
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ARTEX_LLM_PROVIDER: ${ARTEX_LLM_PROVIDER:-}
-      ARTEX_LLM_MODEL: ${ARTEX_LLM_MODEL:-}
-      ARTEX_LLM_BASE_URL: ${ARTEX_LLM_BASE_URL:-}
-      ARTEX_LLM_PROXY: ${ARTEX_LLM_PROXY:-}
+      ARTEX_PG_DSN: postgres://artex:artex_db_pw_CHANGE_ME@postgres:5432/artex?sslmode=disable   # ← 和上面同一个密码
+      # LLM 可以留空,首次进 Web UI 后在设置里配;也可以在这里直接填:
+      # ANTHROPIC_API_KEY: sk-ant-...
+      # OPENAI_API_KEY: sk-...
+      # ARTEX_LLM_PROVIDER: anthropic
+      # ARTEX_LLM_MODEL: claude-opus-5
+      # ARTEX_LLM_BASE_URL: ""
+      # ARTEX_LLM_PROXY: ""
     ports:
+      # Web UI + API
       - "8787:8787"
+      # 流量录制/拦截代理。默认只绑 NAS 本机 —— 这是个 MITM 代理,
+      # 放到局域网上等于开放中继。确实要从 Mac 挂这个代理时,改成 "8788:8788"。
       - "127.0.0.1:8788:8788"
     volumes:
-      # 把数据目录（含 jwt.key、SQLite 等）绑定到项目根目录的 data/，
-      # 方便在宿主机直接查看/备份，容器重建也不丢。
+      # data/ 含 jwt.key、会话记录等,绑定到项目目录方便备份,容器重建不丢
       - ./data:/app/data
-      # 把项目根目录的 skills 挂进容器（覆盖镜像内置的 /app/skills）；
-      # 改 skill 无需重建镜像，容器读的就是宿主机这份。
+      # skills/ 挂进去覆盖镜像内置版本,改 skill 不用重建镜像
       - ./skills:/app/skills
     restart: unless-stopped
 
